@@ -1,28 +1,28 @@
 #include <iostream>
+#include <fstream>
 #include <functional>
 #include <algorithm>
 #include <random>
 #include <csignal>
 
+#include <chrono>
+#include <thread>
+
 #include "../Neural Network/nn.cpp"
 
-using std::function;
+using std::function,
+std::literals::chrono_literals::operator""s,
+std::chrono::steady_clock;
 
-bool show = false;
 bool sign = true;
-
-bool all(vector<bool> v) {
-  for (bool i: v) {
-    if (!i) {
-      return false;
-    }
-  }
-  return true;
-}
-
+bool dump = false;
+float mutateChance = 0.1f;
+float crossChance = 0.7f;
 
 class Population {
   public:
+    vector<NeuralNetwork> individs{};
+
     Population(int size, vector<vector<int>> sizes) {
       this->individs.resize(size);
 
@@ -49,7 +49,6 @@ class Population {
               (float) rand() / RAND_MAX
             };
           }
-
           biases[L] = Matrix<float>(rows);
         }
 
@@ -71,12 +70,14 @@ class Population {
       for (int i = 0; i < offspring.size(); i++) {
         vector<NeuralNetwork> pretenders{};
 
+
         std::sample(
           this->individs.begin(), this->individs.end(),
           std::back_inserter(pretenders),
           2,
           std::mt19937{std::random_device{}()}
         );
+
         if (fitness(pretenders[0], pretenders[1])) {
           offspring[i] = pretenders[1];
         }
@@ -135,14 +136,10 @@ class Population {
 
       return count;
     }
-//  private:
-    vector<NeuralNetwork> individs{};
 };
 
 
 bool fitness(NeuralNetwork first, NeuralNetwork second) {
-  float max = 0;
-  int maxRow = 0;
   bool turn = true;
   bool are_playing = true;
   Matrix<float> field(
@@ -188,6 +185,10 @@ bool fitness(NeuralNetwork first, NeuralNetwork second) {
     }
 
     output = player.getOutput(field);
+
+    float max = 0;
+    int maxRow = 0;
+
     for (int row = 0; row < 9; row++) {
       if (std::find(skip.begin(), skip.end(), row) != skip.end()) {
         continue;
@@ -201,25 +202,15 @@ bool fitness(NeuralNetwork first, NeuralNetwork second) {
     field[maxRow][0] = 1;
     skip.push_back(maxRow);
 
-    max = 0;
-    maxRow = 0;
-
     for (int i = 0; i < 3; i++) {
       for (int j = 0; j < 3; j++) {
         if (field[3 * i + j][0] == 1) {
           binField[i][j] = true;
-          if (show) { std::cout << ((turn)?'x':'o'); }
-        }
-        else if (!field[3 * i + j][0]) {
-          binField[i][j] = false;
-          if (show) { std::cout << ' '; }
         }
         else {
           binField[i][j] = false;
-          if (show) { std::cout << ((!turn)?'x':'o'); }
         }
       }
-      if (show) { std::cout << std::endl; }
     }
 
     transposedField = binField.getTransposed();
@@ -248,36 +239,63 @@ bool fitness(NeuralNetwork first, NeuralNetwork second) {
 int main(int argc, char *argv[]) {
   int c = 0;
   Population pop(
-    50,
+    100,
     {
+      {9, 9},
+      {9, 9},
+      {9, 9},
+      {9, 9},
+      {9, 9},
       {9, 9},
       {9, 9},
       {9, 9},
       {9, 9}
     }
   );
-  signal(SIGINT, [](int p) { sign = false; });
+  signal(
+    SIGINT,
+    [](int p) {
+      std::string s;
+      std::cout << "Settings\nd - dump, s - stop, c - cross chance, m - mutate chance" << std::endl;
+      std::cin >> s;
+      if (s == "d") {
+        dump = true;
+      }
+      else if (s == "s") {
+        sign = false;
+      }
+      else if (s == "c") {
+        std::cin >> crossChance;
+      }
+      else if (s == "m") {
+        std::cin >> mutateChance;
+      }
+    }
+  );
 
   do {
-      std::cout << ++c << std::endl;
-      pop.doSelection(fitness);
-      pop.cross(0.9f);
-      pop.mutate(0.01f);
-      system("clear");
-      std::cout << std::endl;
+    pop.doSelection(fitness);
+    system("clear");
+
+    std::cout << "Gen: " << ++c << std::endl << std::endl;
+
+    std::cout << "Crossed: " << pop.cross(crossChance) << std::endl;
+    std::cout << "Mutated: " << pop.mutate(mutateChance) << std::endl;
+
+    if (!(c % 2500) or dump) {
+      std::this_thread::sleep_for(1s);
+      std::ofstream file("data/" + std::to_string(c) + ".json");
+      std::sort(pop.individs.begin(), pop.individs.end(), fitness);
+      NeuralNetwork best = pop.individs[pop.individs.size() - 1];
+      file << best;
+      dump = false;
+    }
   } while (sign);
 
+  std::ofstream file(std::to_string(c) + ".json");
   std::sort(pop.individs.begin(), pop.individs.end(), fitness);
-  int last = pop.individs.size() - 1;
-  NeuralNetwork best = pop.individs[last];
+  NeuralNetwork best = pop.individs[pop.individs.size() - 1];
+  file << best;
 
-  std::cout << "Layers:" << std::endl;
-  for (int i = 0; i < best.layers.size(); i++) {
-    std::cout << best.layers[i] << std::endl;
-  }
-
-  std::cout << "Biases:" << std::endl;
-  for (int i = 0; i < best.biases.size(); i++) {
-    std::cout << best.biases[i] << std::endl;
-  }
+  
 }
